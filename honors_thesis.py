@@ -10,12 +10,14 @@ import tensorflow as tf
 from tensorflow.keras import Model
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, BatchNormalization, GlobalAveragePooling1D
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split, StratifiedGroupKFold, cross_val_score
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score, f1_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scikeras.wrappers import KerasClassifier
+from pydub import AudioSegment
+from pydub.silence import split_on_silence
 
 
 pd.set_option('display.max_columns', None)
@@ -60,16 +62,18 @@ for item in os.listdir('.'):
         i += 1"""
 
 """for item in os.listdir('./wav audio'):
-    y, sr = librosa.load(f'./wav audio/{item}')
-    intervals = effects.split(y, top_db=30)
+    audio = AudioSegment.from_wav(f'./wav audio/{item}')
+    chunks = split_on_silence(
+        audio,
+        min_silence_len=400,
+        silence_thresh=-45
+    )
     item = item[:-4]
-    i = 1
-    for interval in intervals:
-        non_silent_audio = y[interval[0]:interval[1]]
-        sf.write(f'./wav audio trimmed/{i}_{item}_trimmed.wav', non_silent_audio, sr)
-        i += 1"""
+    for i, chunk in enumerate(chunks):
+        chunk.export(f'./wav audio trimmed/{i}_{item}_trimmed.wav', format="wav")"""
 
 class_labels = {'HS': 0, 'CS': 1}
+# balanced accuracy, roc_auc_score 
 info_df = pd.read_csv('LOS_participant_info.csv')
 info_df['group'] = info_df['group'].map(class_labels)
 info_df['participant'] = info_df['participant'].str[-2:]
@@ -89,13 +93,18 @@ for i in os.listdir('./wav audio trimmed'):
     if num == '53':
         continue
     mfcc = np.mean(mfcc, axis=1)
-    if num in X_test:
+    if int(num) in X_test:
         X_test_list.append(mfcc)
         y_test_list.append(info_df.loc[info_df['participant'] == num, 'group'])
     else:
         X_train_list.append(mfcc)
         y_train_list.append(info_df.loc[info_df['participant'] == num, 'group'])
         groups_train_list.append(num)
+X_train_list = np.array(X_train_list)
+X_test_list = np.array(X_test_list)
+scale = StandardScaler()
+X_train_list = scale.fit_transform(X_train_list)
+X_test_list = scale.transform(X_test_list)
 
 skf = StratifiedGroupKFold(n_splits=5)
 """for i, (train_index, test_index) in enumerate(skf.split(X_train_list, y_train_list, groups_train_list)):
@@ -104,18 +113,22 @@ skf = StratifiedGroupKFold(n_splits=5)
     print(f"  Test:  index={test_index}")"""
 
 model = Sequential([
-    Conv1D(8, 3, activation='relu', input_shape=(13, 1)),
+    Conv1D(4, 3, activation='relu', input_shape=(13, 1)),
     BatchNormalization(),
-    Conv1D(16, 3, activation='relu'),
+    Conv1D(8, 3, activation='relu'),
+    BatchNormalization(),
+    Conv1D(16, 3, activation='relu', name='last_conv'),
     BatchNormalization(),
     GlobalAveragePooling1D(name='gap'),
     Dense(2, activation='softmax')
 ])
-model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['f1_score'])
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=[tf.keras.metrics.AUC(multi_label=True)])
 
-skmodel = KerasClassifier(model=model, epochs=20, batch_size=8, verbose=0)
-scores = cross_val_score(skmodel, X_train_list, y=y_train_list, groups=groups_train_list, scoring='f1', cv=skf)
+skmodel = KerasClassifier(model=model, epochs=24, batch_size=16, verbose=0)
+scores = cross_val_score(skmodel, X_train_list, y=y_train_list, groups=groups_train_list, scoring='roc_auc', cv=skf)
 print(scores)
+# scores2 = cross_val_score(skmodel, X_train_list, y=y_train_list, groups=groups_train_list, scoring='balanced_accuracy', cv=skf)
+# print(scores2)
 
 """cohens_list = []
 for i in hs_df.columns:
@@ -126,42 +139,41 @@ for i in hs_df.columns:
 
 """X_train, X_test, y_train, y_test = train_test_split(mfcc_df, participant_list_new, test_size=0.2, random_state=32, stratify=participant_list_new)
 X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.25, random_state=32, stratify=y_train)
-X_train = X_train.to_numpy()[..., np.newaxis].astype(np.float32)
-X_val = X_val.to_numpy()[..., np.newaxis].astype(np.float32)
-X_test = X_test.to_numpy()[..., np.newaxis].astype(np.float32)
-X_train = tf.convert_to_tensor(X_train, dtype=tf.float32)
-y_train = tf.convert_to_tensor(y_train, dtype=tf.int32)
-X_val = tf.convert_to_tensor(X_val, dtype=tf.float32)
-y_val = tf.convert_to_tensor(y_val, dtype=tf.int32)
-X_test = tf.convert_to_tensor(X_test, dtype=tf.float32)
-y_test = tf.convert_to_tensor(y_test, dtype=tf.int32)
+X_train_list = X_train_list.to_numpy()[..., np.newaxis].astype(np.float32)
+X_test_list = X_test_list.to_numpy()[..., np.newaxis].astype(np.float32)"""
+X_train_list = tf.convert_to_tensor(X_train_list, dtype=tf.float32)
+y_train_list = tf.convert_to_tensor(y_train_list, dtype=tf.int32)
+X_test_list = tf.convert_to_tensor(X_test_list, dtype=tf.float32)
+y_test_list = tf.convert_to_tensor(y_test_list, dtype=tf.int32)
 
-# hs_cam_list = []
-# cs_cam_list = []
+hs_cam_list = []
+cs_cam_list = []
 
 model = Sequential([
-    Conv1D(16, 3, activation='relu', input_shape=(13, 1)),
+    Conv1D(4, 3, activation='relu', input_shape=(13, 1)),
     BatchNormalization(),
-    Conv1D(32, 3, activation='relu'),
+    Conv1D(8, 3, activation='relu'),
     BatchNormalization(),
-    Conv1D(64, 3, activation='relu', name='last_conv'),
+    Conv1D(16, 3, activation='relu', name='last_conv'),
     BatchNormalization(name='last_bn'),
     GlobalAveragePooling1D(name='gap'),
     Dense(2, activation='softmax')
 ])
-model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-model.fit(X_train, y_train, epochs=30, batch_size=16, verbose=0, validation_data=(X_val, y_val))
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=[tf.keras.metrics.AUC(multi_label=True)])
+model.fit(X_train_list, y_train_list, epochs=24, batch_size=16, verbose=0)
 
 int_to_labels = {0: 'HS', 1: 'CS'}
-y_test_pred = model.predict(X_test)
+y_test_pred = model.predict(X_test_list)
 y_test_pred_class = [np.argmax(i) for i in y_test_pred]
-y_test_pred_labels = [int_to_labels[i] for i in y_test_pred_class]"""
+y_test_pred_labels = [int_to_labels[int(i)] for i in y_test_pred_class]
 
-"""cam_model = Model(inputs=model.inputs, outputs=model.get_layer('last_conv').output)
-hs_mask = y_test == 0
-cs_mask = y_test == 1
-hs_x = tf.boolean_mask(X_test, hs_mask, axis=0)
-cs_x = tf.boolean_mask(X_test, cs_mask, axis=0)
+cam_model = Model(inputs=model.inputs, outputs=model.get_layer('last_conv').output)
+hs_mask = y_test_list == 0
+hs_mask = tf.squeeze(hs_mask)
+cs_mask = y_test_list == 1
+cs_mask = tf.squeeze(cs_mask)
+hs_x = tf.boolean_mask(X_test_list, hs_mask, axis=0)
+cs_x = tf.boolean_mask(X_test_list, cs_mask, axis=0)
 hs_mapping = []
 cs_mapping = []
 for i in range(hs_x.shape[0]):
@@ -194,16 +206,16 @@ cs_cam_arr = np.array(cs_cam_list).squeeze()
 cs_cam_df = pd.DataFrame(cs_cam_arr)
 cs_cam_df.to_csv("cs_cam.csv")
 
-
-conf_matrix = confusion_matrix(y_test, y_test_pred_class)
+conf_matrix = confusion_matrix(y_test_list, y_test_pred_class)
 plt.figure(figsize=(10, 8))
 sns.heatmap(conf_matrix, annot=True, fmt='d')
 plt.xlabel('Predicted')
 plt.ylabel('True')
 plt.title('Confusion Matrix')
+plt.savefig('confusion_matrix.png')
 plt.show()
 
-cam_model = Model(inputs=model.inputs, outputs=model.get_layer('last_conv').output)
+"""cam_model = Model(inputs=model.inputs, outputs=model.get_layer('last_conv').output)
 hs_mask = y_test == 0
 cs_mask = y_test == 1
 hs_x = tf.boolean_mask(X_test, hs_mask, axis=0)
@@ -229,7 +241,7 @@ for i in range(cs_x.shape[0]):
     sample_mapping = class_activation_map(model, cam_model, sample, 1)
     cs_mapping.append(sample_mapping)
 cs_mapping = np.array(cs_mapping)
-cs_mapping = np.mean(cs_mapping, axis=0)
+cs_mapping = np.mean(cs_mapping, axis=0)"""
 
 plt.figure(figsize=(8, 3))
 plt.plot(hs_mapping, label='HS')
@@ -239,19 +251,22 @@ plt.ylabel('Importance')
 plt.title('Average Importance of MFCCs')
 plt.legend()
 plt.tight_layout()
+plt.savefig('mfcc_importance_line_plot.png')
 plt.show()
 
 plt.figure(figsize=(10, 8))
-sns.heatmap(hs_mapping, annot=True, cbar_kws={'label': 'Importance'})
+sns.heatmap(hs_mapping.reshape((-1,1)), annot=True, cbar_kws={'label': 'Importance'})
 plt.ylabel('MFCC Index (0-Based Indexing)')
 plt.title('Relative Importance of MFCCs in HS Heatmap')
 plt.tight_layout()
+plt.savefig('mfcc_hs_heatmap.png')
 plt.show()
 
 plt.figure(figsize=(10, 8))
-sns.heatmap(cs_mapping, annot=True, cbar_kws={'label': 'Importance'})
+sns.heatmap(cs_mapping.reshape((-1,1)), annot=True, cbar_kws={'label': 'Importance'})
 plt.ylabel('MFCC Index (0-Based Indexing)')
 plt.title('Relative Average Importance of MFCCs in CS Heatmap')
 plt.tight_layout()
+plt.savefig('mfcc_cs_heatmap.png')
 plt.show()
-"""
+
