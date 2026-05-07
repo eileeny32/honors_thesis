@@ -50,30 +50,7 @@ def integrated_gradients_full(model, X, class_idx, steps=100):
     return ig.numpy().squeeze()
 
 
-def receptive_field_map(x, mapping):
-    sums = np.zeros(x.shape[1])
-    counts = np.zeros(x.shape[1])
-    for i in range(mapping.shape[0]):
-        start = i
-        end = i + 7
-        sums[start:end] += mapping[i]
-        counts[start:end] += 1
-    rf_map = sums/counts
-    rf_map = rf_map.reshape(x.shape[1:])
-    return rf_map
-
-
-def class_activation_map(cnn, cam, x, label):
-    cnn_weight = cam(x)
-    cnn_weight = cnn_weight.numpy()[0]
-    label_weight = cnn.layers[-1].get_weights()[0][:, label]
-    mapping = np.dot(cnn_weight, label_weight).reshape((-1, 1))
-    mapping = receptive_field_map(x, mapping)
-    mapping = np.maximum(mapping, 0)
-    return mapping
-
-
-"""i = 1
+i = 1
 file_names = ['frutas_1.wav', 'verduras_2.wav', 'instrumentos musicales_3.wav', 'artículos de ropa_5.wav']
 excl = ['wav audio', 'honors_thesis.py']
 for item in os.listdir('.'):
@@ -85,9 +62,9 @@ for item in os.listdir('.'):
                 file_new = file[:-4]
                 file_new = file_new + '_' + str(i) + '.wav'
                 shutil.move(f'./{item}/recorded_audio/{file}', f'./wav audio/{file_new}')
-        i += 1"""
+        i += 1
 
-"""for item in os.listdir('./wav audio'):
+for item in os.listdir('./wav audio'):
     audio = AudioSegment.from_wav(f'./wav audio/{item}')
     chunks = split_on_silence(
         audio,
@@ -96,7 +73,7 @@ for item in os.listdir('.'):
     )
     item = item[:-4]
     for i, chunk in enumerate(chunks):
-        chunk.export(f'./wav audio trimmed/{i}_{item}_trimmed.wav', format="wav")"""
+        chunk.export(f'./wav audio trimmed/{i}_{item}_trimmed.wav', format="wav")
 
 class_labels = {'heritage': 1, 'control': 0}
 # balanced accuracy, roc_auc_score 
@@ -163,24 +140,6 @@ for i in range(30):
     scores = cross_val_score(skmodel, X_train_list, y=y_train_list, groups=groups_train_list, scoring='roc_auc', cv=skf)
     print(scores)
     val_scores.append(scores)
-    # scores2 = cross_val_score(skmodel, X_train_list, y=y_train_list, groups=groups_train_list, scoring='balanced_accuracy', cv=skf)
-    # print(scores2)
-
-    """cohens_list = []
-    for i in hs_df.columns:
-        hs_group = hs_df[i]
-        cs_group = cs_df[i]
-        cohens_d = pg.compute_effsize(x=hs_group, y=cs_group, eftype='cohen')
-        cohens_list.append(cohens_d)"""
-
-    """X_train, X_test, y_train, y_test = train_test_split(mfcc_df, participant_list_new, test_size=0.2, random_state=32, stratify=participant_list_new)
-    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.25, random_state=32, stratify=y_train)
-    X_train_list = X_train_list.to_numpy()[..., np.newaxis].astype(np.float32)
-    X_test_list = X_test_list.to_numpy()[..., np.newaxis].astype(np.float32)
-    X_train_list = tf.convert_to_tensor(X_train_list, dtype=tf.float32)
-    y_train_list = tf.convert_to_tensor(y_train_list, dtype=tf.int32)
-    X_test_list = tf.convert_to_tensor(X_test_list, dtype=tf.float32)
-    y_test_list = tf.convert_to_tensor(y_test_list, dtype=tf.int32)"""
 
     hs_cam_list = []
     cs_cam_list = []
@@ -218,31 +177,6 @@ for i in range(30):
     cs_ig = integrated_gradients_full(model, cs_x, 0)
     hs_mean = np.mean(hs_ig, axis=0)
     cs_mean = np.mean(cs_ig, axis=0)
-
-    """hs_mapping = []
-    cs_mapping = []
-    for i in range(hs_x.shape[0]):
-        sample = hs_x[0]
-        if i == hs_x.shape[0] - 1:
-            sample = hs_x[i:]
-        else:
-            sample = hs_x[i:i + 1]
-        sample_mapping = class_activation_map(model, cam_model, sample, 1)
-        hs_mapping.append(sample_mapping)
-    hs_mapping = np.array(hs_mapping)
-    hs_mapping = np.mean(hs_mapping, axis=0)
-    hs_cam_list.append(list(hs_mapping))
-    for i in range(cs_x.shape[0]):
-        sample = cs_x[0]
-        if i == cs_x.shape[0] - 1:
-            sample = cs_x[i:]
-        else:
-            sample = cs_x[i:i + 1]
-        sample_mapping = class_activation_map(model, cam_model, sample, 0)
-        cs_mapping.append(sample_mapping)
-    cs_mapping = np.array(cs_mapping)
-    cs_mapping = np.mean(cs_mapping, axis=0)
-    cs_cam_list.append(list(cs_mapping))"""
     
     hs_ig_df = pd.DataFrame(hs_mean)
     cs_ig_df = pd.DataFrame(cs_mean)
@@ -255,61 +189,40 @@ for i in range(30):
 
     conf_matrix = confusion_matrix(y_test_list, y_test_pred_class)
     plt.figure(figsize=(10, 8))
-    sns.heatmap(conf_matrix, annot=True, fmt='d')
+    sns.heatmap(conf_matrix, annot=True, fmt='d', xticklabels=["Control Group", "Heritage Group"], yticklabels=["Control Group", "Heritage Group"])
     plt.xlabel('Predicted')
     plt.ylabel('True')
-    plt.title('Confusion Matrix')
+    plt.title('Confusion Matrix of Model Predictions')
     plt.savefig(f'./confusion matrices/confusion_matrix_{i}.png')
-
-    """cam_model = Model(inputs=model.inputs, outputs=model.get_layer('last_conv').output)
-    hs_mask = y_test == 0
-    cs_mask = y_test == 1
-    hs_x = tf.boolean_mask(X_test, hs_mask, axis=0)
-    cs_x = tf.boolean_mask(X_test, cs_mask, axis=0)
-    hs_mapping = []
-    cs_mapping = []
-    for i in range(hs_x.shape[0]):
-        sample = hs_x[0]
-        if i == hs_x.shape[0] - 1:
-            sample = hs_x[i:]
-        else:
-            sample = hs_x[i:i+1]
-        sample_mapping = class_activation_map(model, cam_model, sample, 0)
-        hs_mapping.append(sample_mapping)
-    hs_mapping = np.array(hs_mapping)
-    hs_mapping = np.mean(hs_mapping, axis=0)
-    for i in range(cs_x.shape[0]):
-        sample = cs_x[0]
-        if i == cs_x.shape[0] - 1:
-            sample = cs_x[i:]
-        else:
-            sample = cs_x[i:i+1]
-        sample_mapping = class_activation_map(model, cam_model, sample, 1)
-        cs_mapping.append(sample_mapping)
-    cs_mapping = np.array(cs_mapping)
-    cs_mapping = np.mean(cs_mapping, axis=0)"""
 
     plt.figure(figsize=(8, 3))
     plt.plot(hs_mean, label='HS')
     plt.plot(cs_mean, label='CS')
-    plt.xlabel('MFCC Index (0-Based Indexing)')
+    plt.xticks(np.arange(13), np.arange(1, 14))
+    plt.xlabel('MFCC')
     plt.ylabel('Importance')
-    plt.title('Average Importance of MFCCs')
+    plt.title('Importance of MFCCs Across Groups (Integrated Gradients)')
     plt.legend()
     plt.tight_layout()
     plt.savefig(f'./line charts/mfcc_importance_line_plot_{i}.png')
 
     plt.figure(figsize=(10, 8))
     sns.heatmap(hs_mean.reshape(-1,1), annot=True, cbar_kws={'label': 'Importance'}, yticklabels=range(1, 14))
-    plt.ylabel('MFCC Index (0-Based Indexing)')
-    plt.title('Relative Importance of MFCCs in HS Heatmap')
+    plt.xticks([])
+    plt.yticks(np.arange(13) + 0.5, np.arange(1, 14))
+    plt.xlabel('Importance Value')
+    plt.ylabel('MFCC')
+    plt.title('Importance of MFCCs in Heritage Speaker Group (Integrated Gradients)')
     plt.tight_layout()
     plt.savefig(f'./hs heatmaps/mfcc_hs_heatmap_{i}.png')
 
     plt.figure(figsize=(10, 8))
     sns.heatmap(cs_mean.reshape(-1,1), annot=True, cbar_kws={'label': 'Importance'})
-    plt.ylabel('MFCC Index (0-Based Indexing)')
-    plt.title('Relative Average Importance of MFCCs in CS Heatmap')
+    plt.xticks([])
+    plt.yticks(np.arange(13) + 0.5, np.arange(1, 14))
+    plt.xlabel('Importance Value')
+    plt.ylabel('MFCC')
+    plt.title('Importance of MFCCs in Control Speaker Group (Integrated Gradients)')
     plt.tight_layout()
     plt.savefig(f'./cs heatmaps/mfcc_cs_heatmap_{i}.png')
 
